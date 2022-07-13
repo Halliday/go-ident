@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>index.html</title>
+</head>
+
+<body>
+    <h1>Register</h1>
+    <form id="register">
+        <label for="preferred_username">Username</label>
+        <input type="text" name="preferred_username" id="preferred_username"><br>
+        <label for="email">Email</label>
+        <input type="text" name="email"><br>
+        <label for="password">Password</label>
+        <input type="password" name="password"><br>
+        <button type="submit">Register</button>
+    </form>
+    <hr>
+    <h1>Login</h1>
+    <form id="login">
+        <label for="email">Email</label>
+        <input type="text" name="email"><br>
+        <label for="password">Password</label>
+        <input type="password" name="password"><br>
+        <button type="submit">Login</button>
+    </form>
+    <h2>Social Provider</h2>
+    <a id="social-test1">Use social provider 1</a>
+    <hr>
+    <h1>Reset password</h1>
+    <form id="reset">
+        <label for="email">Email</label>
+        <input type="text" name="email"><br>
+        <button type="submit">Submit</button>
+    </form>
+    <hr>
+    <h1>Reset password now</h1>
+    <form id="reset_now">
+        <label for="password">New Password</label>
+        <input type="text" name="username" style="display: none">
+        <input type="password" name="password" disabled><br><br>
+        <button type="submit" name="submit" disabled>Submit</button>
+    </form>
+    <hr>
+    <script>
+        const search = new URLSearchParams(location.search);
+        const query = new URLSearchParams(location.search);
+        const knownQueryFields = ["client_id", "response_type", "scope", "state", "redirect_uri", "nonce"];
+        for(const field of query.keys()) if(!knownQueryFields.includes(field)) query.delete(field);
+
+        const socialTest1 = document.getElementById("social-test1");
+        socialTest1.href = "/social/test1?"+query.toString();
+
+        const register = document.getElementById("register");
+        register.addEventListener("submit", (ev) => {
+            ev.preventDefault();
+            const preferred_username = register.elements.preferred_username.value;
+            const email = register.elements.email.value;
+            const password = register.elements.password.value;
+            const locale = "en-US";
+            fetch("/register?"+query.toString(), {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({preferred_username, email, password, locale})
+            })
+        });
+
+        const login = document.getElementById("login");
+        login.addEventListener("submit", (ev) => {
+            ev.preventDefault();
+            const username = login.elements.email.value;
+            const password = login.elements.password.value;
+            fetch("/login?"+query.toString(), {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({username, password})
+            }).then((resp) => {
+                if (resp.ok) {
+                    resp.text().then(url => {
+                        location.href = url;
+                    })
+                } else {
+                    alert(resp.statusText);
+                }
+            })
+        });
+
+        const reset = document.getElementById("reset");
+        reset.addEventListener("submit", (ev) => {
+            ev.preventDefault();
+            const email = reset.elements.email.value;
+            fetch("/reset-password?"+query.toString(), {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({email})
+            });
+        });
+
+        const resetPasswordToken = search.get("reset_password_token");
+        const reset_now = document.getElementById("reset_now");
+        if(resetPasswordToken) {
+            reset_now.elements.password.disabled = false;
+            reset_now.elements.submit.disabled = false;
+
+            const claims = JSON.parse(atob(resetPasswordToken.split(".")[1]));
+            const email = claims.sub;
+            reset_now.elements.username.value = email;
+
+            reset_now.addEventListener("submit", (ev) => {
+                ev.preventDefault();
+                const password = reset_now.elements.password.value;
+                fetch("/reset-password-now?"+query.toString(), {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({password, resetPasswordToken})
+                }).then((resp) => {
+                    alert(resp.statusText);
+                    if(resp.ok) {
+                        location.href = "?"+query.toString()+"#password-reset-successful";
+                    }
+                });
+            });
+        }
+    </script>
+</body>
+
+</html>

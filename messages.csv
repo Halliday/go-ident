@@ -1,0 +1,34 @@
+unauthorized;401;Unauthorized.
+bad_request;400;Bad Request.
+
+prepare_register_email;500;Can not prepare registration email.
+register_send_mail;500;Can not send registration mail.
+prepare_reset_email;500;Can not prepare reset-password email.
+reset_send_mail;500;Can not send mail.
+social_provider_not_found;404;Social provider not found.
+social_code_exchange_failed;400;The code exchange with the social provider failed.
+email_unverified;400;Email verification pending.
+
+invalid_exp;400;Token expired.
+invalid_aud;400;Invalid token audience.
+invalid_sub;400;Invalid token subject.
+invalid_iss;400;Invalid token issuer.
+
+invalid_credentials;401;Invalid credentials.
+
+social_unsupported_response_types;500;The social provider has no supported response type.
+social_unsupported_userinfo_content_type;500;The social provider sent a userinfo with and unsupported content type.
+social_token_type;500;The social provider return an unsupported token type.
+social_missing_field;400;Missing field.
+
+register_email_send;2001;Failed to send registration email.
+register_email_sent;2001;Registration email sent.
+registration_complete;2002;Registration complete.
+reset_email_sent;2003;Password reset email sent.
+
+err_prepare_token;5001;Can not prepare token '%s'.
+err_prepare_email;5002;Can not prepare email '%s'.
+err_send_email;5003;Can not send email '%s'.
+email_sent;2004;Email '%s' sent.
+
+bad_store_sub;0;The storage returned a zero subject.

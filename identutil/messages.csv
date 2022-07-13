@@ -1,0 +1,16 @@
+bad_request;400;Bad Request.
+
+session_created;2001;Created session.
+session_refreshed;2002;Refreshed session.
+user_created;2003;Created user.
+social_user_created;2004;Social user created.
+user_verfied;2005;User verified.
+user_updated;2006;Updated user.
+session_revoked;2007;Session revoked.
+
+bad_pagetoken;400;Bad pagetoken value.
+no_password;400;This account has no password set.
+
+users_suspended;2101;%d users suspended.
+users_released;2102;%d users released.
+users_deleted;2103;%d users deleted.
