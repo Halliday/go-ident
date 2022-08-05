@@ -102,10 +102,10 @@ func (server *Server) completeResetPassword(ctx context.Context, req *ResetPassw
 	if err != nil {
 		return err
 	}
-	if aud, _ := claims["aud"].(string); aud != ResetPasswordAud {
+	if aud, _ := claims[Audience].(string); aud != ResetPasswordAud {
 		return e("invalid_aud")
 	}
-	sub, _ := claims["sub"].(string)
+	sub, _ := claims[Subject].(string)
 	info := &UserUpdate{
 		Userinfo: openid.Userinfo{
 			Subject: sub,

@@ -63,10 +63,10 @@ func (server *Server) completeRegistration(ctx context.Context, req *CompleteReg
 	if err != nil {
 		return nil, err
 	}
-	if aud, _ := claims["sub"].(string); aud != RegistrationAud {
+	if aud, _ := claims[Audience].(string); aud != RegistrationAud {
 		return nil, e("invalid_aud")
 	}
-	sub, _ := claims["sub"].(string)
+	sub, _ := claims[Subject].(string)
 	email, _ := claims["email"].(string)
 	info := &UserUpdate{
 		Userinfo: openid.Userinfo{
@@ -105,10 +105,10 @@ const RegistrationAud = "_complete_registration"
 // }
 
 func (server *Server) CreateToken(claims map[string]interface{}) (string, error) {
-	if aud, _ := claims["aud"].(string); aud == "" {
+	if aud, _ := claims[Audience].(string); aud == "" {
 		panic("CreateToken: missing aud")
 	}
-	if sub, _ := claims["sub"].(string); sub == "" {
+	if sub, _ := claims[Subject].(string); sub == "" {
 		panic("CreateToken: missing sub")
 	}
 	mapClaims := jwt.MapClaims{
