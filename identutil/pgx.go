@@ -941,7 +941,7 @@ func (store *PgxStore) DeleteUsers(ctx context.Context, user []string) (numDelet
 	if err = ids.Set(user); err != nil {
 		return 0, nil
 	}
-	tag, err := store.Pool.Exec(ctx, `DELETE FORM "`+store.UsersTableName+`"  WHERE id = ANY($1)`, ids, user)
+	tag, err := store.Pool.Exec(ctx, `DELETE FROM "`+store.UsersTableName+`"  WHERE id = ANY($1)`, ids)
 	if err != nil {
 		return 0, err
 	}
