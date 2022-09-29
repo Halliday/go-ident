@@ -3,43 +3,40 @@ package ident
 import (
 	"context"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/halliday/go-openid"
 )
 
-type BeginResetPasswordRequest struct {
-	Email string
+const ResetPasswordAud = "_reset_password"
 
-	ClientId     string
-	ResponseType string
-	Scope        string
-	Nonce        string
-	State        string
-	RedirectUri  string
+type InstructPasswordResetRequest struct {
+	Email       string `json:"email"`
+	RedirectUri string `json:"redirectUri"`
 }
 
-func (server *Server) beginResetPassword(ctx context.Context, req *BeginResetPasswordRequest) (err error) {
-	user, err := server.UserStore.FindUserPasswordReset(ctx, req.Email)
+func (server *Server) instructPasswordReset(ctx context.Context, req *InstructPasswordResetRequest) (err error) {
+	users, _, err := server.UserStore.FindUsers(ctx, Selection{Email: req.Email}, "", 1)
 	if err != nil {
 		return err
 	}
-	if user == nil {
+	if len(users) == 0 {
 		return openid.ErrNoUser
 	}
+	user := users[0]
 	if user.Subject == "" {
 		return e("bad_store_sub")
 	}
-	go server.emailResetPassword(user, req)
+	go server.emailPasswordReset(&user.Userinfo, req)
 	return nil
 }
 
-func (server *Server) emailResetPassword(user *openid.Userinfo, req *BeginResetPasswordRequest) {
+func (server *Server) emailPasswordReset(user *Userinfo, req *InstructPasswordResetRequest) {
 
 	resetPasswordToken, err := server.CreateToken(map[string]interface{}{
-		Subject:   user.Subject,
 		Audience:  ResetPasswordAud,
+		Subject:   user.Subject,
+		"email":   user.Email,
 		ExpiresAt: time.Now().Add(time.Hour * 24).Unix(),
 	})
 	if err != nil {
@@ -47,34 +44,14 @@ func (server *Server) emailResetPassword(user *openid.Userinfo, req *BeginResetP
 		return
 	}
 
-	v := url.Values{
-		"reset_password_token": {resetPasswordToken},
-		"client_id":            {req.ClientId},
-		"response_type":        {req.ResponseType},
-		"email":                {user.Email},
-	}
-	if req.Scope != "" {
-		v.Set("scope", req.Scope)
-	}
-	if req.State != "" {
-		v.Set("state", req.State)
-	}
-	if req.Nonce != "" {
-		v.Set("nonce", req.Nonce)
+	v := url.Values{"token": {resetPasswordToken}}
+	if req.RedirectUri != "" {
+		v.Set("redirect_uri", req.RedirectUri)
 	}
 
-	var b strings.Builder
-	b.WriteString(server.Config.AuthorizationEndpoint)
-	if strings.Contains(server.Config.AuthorizationEndpoint, "?") {
-		b.WriteByte('&')
-	} else {
-		b.WriteByte('?')
-	}
-	b.WriteString(v.Encode())
-
-	addr, auth, msg, err := server.prepareMail("Passwort Zurücksetzen", user.Email, server.PasswordResetTemplate, &Email{
+	addr, auth, msg, err := server.prepareMail(server.PasswordResetSubject, user.Email, server.PasswordResetTemplate, &Email{
 		Userinfo:    user,
-		RedirectUri: b.String(),
+		RedirectUri: joinUriParams(server.Config.AuthorizationEndpoint, v),
 	})
 	if err != nil {
 		l.Err("prepare_reset_email", err, "Email", user.Email, "Username", user.PreferredUsername, "Locale", user.Locale)
@@ -92,12 +69,12 @@ func (server *Server) emailResetPassword(user *openid.Userinfo, req *BeginResetP
 }
 
 type ResetPasswordRequest struct {
-	ResetPasswordToken string
-	Password           string
+	ResetPasswordToken string `json:"resetPasswordToken"`
+	Password           string `json:"password"`
+	RedirectUri        string `json:"redirectUri"`
 }
 
-func (server *Server) completeResetPassword(ctx context.Context, req *ResetPasswordRequest) (err error) {
-
+func (server *Server) resetPassword(ctx context.Context, req *ResetPasswordRequest) (err error) {
 	claims, err := server.ParseToken(req.ResetPasswordToken)
 	if err != nil {
 		return err
@@ -106,63 +83,14 @@ func (server *Server) completeResetPassword(ctx context.Context, req *ResetPassw
 		return e("invalid_aud")
 	}
 	sub, _ := claims[Subject].(string)
-	info := &UserUpdate{
-		Userinfo: openid.Userinfo{
-			Subject: sub,
-		},
-		NewPassword: req.Password,
+	count, err := server.UserStore.UpdateUsers(ctx, Selection{Ids: []string{sub}}, &UserUpdate{NewPassword: NewOption(req.Password)})
+	if err != nil {
+		return err
 	}
-	return server.UserStore.UpdateUser(ctx, info)
+	if count == 0 {
+		return ErrNoUser
+	}
+	return
 }
-
-////////////////////////////////////////////////////////////////////////////////
-
-const ResetPasswordAud = "_password_reset"
-
-// func (server *Server) ParseResetPasswordToken(resetPasswordToken string) (sub string, err error) {
-// 	token, err := jwt.Parse(resetPasswordToken, func(token *jwt.Token) (interface{}, error) {
-// 		if token.Method != jwt.SigningMethodHS256 {
-// 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-// 		}
-// 		return server.AccessTokenKey, nil
-// 	})
-// 	if err != nil {
-// 		switch er := err.(type) {
-// 		case *jwt.ValidationError:
-// 			if er.Errors&jwt.ValidationErrorExpired != 0 {
-// 				return "", e("invalid_exp")
-// 			}
-// 		}
-// 		return "", err
-// 	}
-// 	claims := token.Claims.(jwt.MapClaims)
-// 	aud := claims["aud"].(string)
-// 	if aud != ResetPasswordAud {
-// 		return "", e("invalid_aud")
-// 	}
-
-// 	iss := claims["iss"].(string)
-// 	if iss != server.Addr {
-// 		return "", e("invalid_iss")
-// 	}
-
-// 	sub, ok := claims["sub"].(string)
-// 	if !ok || !strings.HasPrefix(sub, openid.AccessTokenSubjectPrefix) {
-// 		return "", e("invalid_sub")
-// 	}
-// 	sub = sub[len(openid.AccessTokenSubjectPrefix):]
-// 	return sub, nil
-// }
-
-// func (server *Server) CreateResetPasswordToken(sub string) (string, error) {
-// 	resetPasswordToken := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-// 		"aud": ResetPasswordAud,
-// 		"iss": server.Addr,
-// 		"sub": openid.AccessTokenSubjectPrefix + sub,
-// 		"iat": time.Now().Unix(),
-// 		"exp": time.Now().Add(server.PasswordResetTokenExpiry).Unix(),
-// 	})
-// 	return resetPasswordToken.SignedString(server.AccessTokenKey)
-// }
 
 ////////////////////////////////////////////////////////////////////////////////

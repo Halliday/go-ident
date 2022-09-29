@@ -8,6 +8,11 @@ user_verfied;2005;User verified.
 user_updated;2006;Updated user.
 session_revoked;2007;Session revoked.
 
+bad_selection;4001;Bad selection.
+bad_locale;4002;Bade 'locale'.
+
+email_already_registered;4004;The email is already registered.
+
 bad_pagetoken;400;Bad pagetoken value.
 no_password;400;This account has no password set.
 

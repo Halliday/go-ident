@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v4"
 	"github.com/google/uuid"
 	"github.com/halliday/go-openid"
+	"github.com/halliday/go-rpc"
 	"golang.org/x/net/context"
 	"golang.org/x/oauth2"
 )
@@ -43,22 +43,42 @@ func (p SocialProvider) Exchange(ctx context.Context, server *Server, code strin
 		TokenType:    t.Type(),
 		AccessToken:  t.AccessToken,
 		RefreshToken: t.RefreshToken,
-		ExiresIn:     int64(time.Until(t.Expiry)),
+		ExpiresIn:    int64(time.Until(t.Expiry)),
 	}, nil
+}
+
+func (p SocialProvider) Token(ctx context.Context, server *Server, a *openid.AuthResponse) (t *openid.TokenResponse, err error) {
+	if a.Code != "" {
+		t, err = p.Exchange(ctx, server, a.Code)
+		if err != nil {
+			return nil, err
+		}
+		return t, nil
+	}
+	if a.AccessToken != "" || a.RefreshToken != "" || a.IdToken != "" {
+		return &openid.TokenResponse{
+			TokenType:    a.TokenType,
+			AccessToken:  a.AccessToken,
+			RefreshToken: a.RefreshToken,
+			IdToken:      a.IdToken,
+			ExpiresIn:    a.ExpiresIn,
+		}, nil
+	}
+	return t, e("bad_token")
 }
 
 func (p SocialProvider) Userinfo(ctx context.Context, server *Server, t *openid.TokenResponse) (info *openid.Userinfo, err error) {
 
-	if t.IdToken != "" {
-		claims := new(IdTokenClaims)
-		parser := jwt.NewParser()
-		// TODO: verify token from social provider
-		_, _, err := parser.ParseUnverified(t.IdToken, claims)
-		if err != nil {
-			return nil, err
-		}
-		return &claims.Userinfo, nil
-	}
+	// if t.IdToken != "" {
+	// 	claims := new(IdTokenClaims)
+	// 	parser := jwt.NewParser()
+	// 	// TODO: verify token from social provider
+	// 	_, _, err := parser.ParseUnverified(t.IdToken, claims)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	return &claims.Userinfo, nil
+	// }
 
 	if t.AccessToken != "" && (t.TokenType == "" || strings.EqualFold(t.TokenType, "Bearer")) {
 		req, err := http.NewRequest("GET", p.Config.UserinfoEndpoint, nil)
@@ -82,63 +102,44 @@ func (p SocialProvider) Userinfo(ctx context.Context, server *Server, t *openid.
 		}
 	}
 
-	if t.Code != "" {
-		t, err = p.Exchange(ctx, server, t.Code)
-		if err != nil {
-			return nil, err
-		}
-		return p.Userinfo(ctx, server, t)
-	}
+	// if t.Code != "" {
+	// 	t, err = p.Exchange(ctx, server, t.Code)
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	return p.Userinfo(ctx, server, t)
+	// }
 
 	return nil, e("social_token_type", "TokenType", t.TokenType)
 }
 
 type SocialLoginRequest struct {
-	Iss string `json:"iss"`
-
-	openid.TokenRequest
-	ClientId     string `json:"clientId"`
-	ResponseType string `json:"responseType"`
-	Scope        string `json:"scope"`
-	Nonce        string `json:"nonce"`
-	State        string `json:"state"`
-	RedirectUri  string `json:"redirectUri"`
+	Iss         string `json:"iss"`
+	RedirectUri string `json:"redirectUri"`
 }
 
 type SocialLoginResponse struct {
 	RedirectUri string `json:"redirectUri"`
 }
 
-func (server *Server) socialLogin(ctx context.Context, req *SocialLoginRequest) (resp *SocialLoginResponse, err error) {
-	resp = new(SocialLoginResponse)
+func (server *Server) SocialLogin(iss string, redirectUri string) (redirectUri2 string, err error) {
 
-	p := server.socials[req.Iss]
+	p := server.socials[iss]
 	if p == nil {
-		return nil, e("social_provider_not_found")
+		return "", e("social_provider_not_found")
 	}
 
-	s := url.Values{
-		"iss":           {req.Iss},
-		"response_type": {req.ResponseType},
+	s := url.Values{"iss": {iss}}
+	if redirectUri != "" {
+		s.Set("redirect_uri", redirectUri)
 	}
-	if req.RedirectUri != "" {
-		s.Add("redirect_uri", req.RedirectUri)
-	}
-	if req.Scope != "" {
-		s.Add("scope", req.Scope)
-	}
-	if req.Nonce != "" {
-		s.Add("nonce", req.Nonce)
-	}
-	if req.State != "" {
-		s.Add("state", req.State)
-	}
+
 	state := s.Encode()
 
 	responseTypesSupported := p.Config.ResponseTypesSupported
 	if responseTypesSupported == nil || stringSliceIncludes(responseTypesSupported, "code") {
-		resp.RedirectUri = p.OAuth2Config(server).AuthCodeURL(state)
-		return resp, nil
+
+		return p.OAuth2Config(server).AuthCodeURL(state), nil
 	}
 
 	if stringSliceIncludes(responseTypesSupported, "token id_token") || stringSliceIncludes(responseTypesSupported, "id_token") {
@@ -159,78 +160,107 @@ func (server *Server) socialLogin(ctx context.Context, req *SocialLoginRequest) 
 			"redirect_uri":  {server.Config.AuthorizationEndpoint},
 			"nonce":         {nonce},
 		}
-		if strings.Contains(p.Config.AuthorizationEndpoint, "?") {
-			buf.WriteByte('&')
-		} else {
-			buf.WriteByte('?')
-		}
-		buf.WriteString(v.Encode())
 
-		resp.RedirectUri = buf.String()
-		return resp, nil
+		return joinUriParams(p.Config.AuthorizationEndpoint, v), nil
 	}
 
-	return nil, e("social_unsupported_response_types")
+	return "", e("social_unsupported_response_types")
 }
 
-type CompleteSocialLoginRequest struct {
-	Iss                  string `json:"iss"` // social provider
-	openid.TokenResponse        // as obtained from social provider
-	openid.TokenRequest
+func (server *Server) socialLogin(ctx context.Context, req *SocialLoginRequest) (err error) {
+	redirectUri, err := server.SocialLogin(req.Iss, req.RedirectUri)
+	if err != nil {
+		return err
+	}
+	return rpc.Redirect(redirectUri, 303)
 }
 
-type CompleteSocialLoginResponse = openid.TokenResponse
+func (server *Server) postSocialLogin(ctx context.Context, req *SocialLoginRequest) (resp *SocialLoginResponse, err error) {
+	resp = new(SocialLoginResponse)
+	resp.RedirectUri, err = server.SocialLogin(req.Iss, req.RedirectUri)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
 
-func (server *Server) completeSocialLogin(ctx context.Context, req *CompleteSocialLoginRequest) (resp *CompleteSocialLoginResponse, err error) {
+type ExchangeSocialLoginRequest struct {
+	Auth        openid.AuthResponse `json:"auth"`
+	Scope       string              `json:"scope"`
+	Nonce       string              `json:"nonce"`
+	RedirectUri string              `json:"redirectUri"`
+}
 
-	p := server.socials[req.Iss]
+type ExchangeSocialLoginResponse = openid.TokenResponse
+
+func (server *Server) exchangeSocialLogin(ctx context.Context, req *ExchangeSocialLoginRequest) (resp *ExchangeSocialLoginResponse, err error) {
+
+	state, err := url.ParseQuery(req.Auth.State)
+	if err != nil {
+		return nil, e("bad_request", err)
+	}
+	// redirectUri := state.Get("redirect_uri")
+	iss := state.Get("iss")
+
+	p := server.socials[iss]
 	if p == nil {
 		return nil, e("social_provider_not_found")
 	}
 
-	info, err := p.Userinfo(ctx, server, &req.TokenResponse)
+	token, err := p.Token(ctx, server, &req.Auth)
 	if err != nil {
 		return nil, err
 	}
 
-	if info.Email == "" {
-		info.EmailVerified = true
-	}
-
-	sub, err := server.UserStore.RegisterSocialUser(ctx, req.Iss, info)
+	info, err := p.Userinfo(ctx, server, token)
 	if err != nil {
 		return nil, err
 	}
-	if sub == "" {
-		return nil, openid.ErrNoUser
+
+	// if info.Email == "" {
+	// 	info.EmailVerified = true
+	// }
+
+	subs, err := server.UserStore.RegisterUsers(ctx, iss, false, []*User{{Userinfo: *info}})
+	if err != nil {
+		return nil, err
 	}
-	req.TokenRequest.Subject = sub
+	if len(subs) != 1 {
+		return nil, ErrNoUser
+	}
 
-	return server.Authorize(ctx, &req.TokenRequest)
+	refreshToken, accessToken, scopes, expiresIn, idToken, err := server.CreateSession(ctx, IdentAudience, subs[0], nil, "")
+	if err != nil {
+		return nil, err
+	}
+	return &ExchangeSocialLoginResponse{
+		RefreshToken: refreshToken,
+		AccessToken:  accessToken,
+		IdToken:      idToken,
+		ExpiresIn:    expiresIn,
+		Scope:        Scopes(scopes).String(),
+	}, nil
+}
 
-	// authResp, err := server.Authorize(ctx, &openid.AuthorizationRequest{
-	// 	Subject:      sub,
-	// 	Scope:        state.Get("scope"),
-	// 	Nonce:        state.Get("nonce"),
-	// 	ResponseType: state.Get("response_type"),
-	// 	State:        state.Get("state"),
-	// })
-	// if err != nil {
-	// 	tools.ServeError(resp, err)
-	// 	return
-	// }
+//
 
-	// var buf bytes.Buffer
-	// buf.WriteString(server.Config.AuthorizationEndpoint)
-	// if strings.Contains(server.Config.AuthorizationEndpoint, "?") {
-	// 	buf.WriteByte('&')
-	// } else {
-	// 	buf.WriteByte('?')
-	// }
+type socialProvider struct {
+	Issuer string `json:"iss"`
+	// Picture string `json:"picture"`
+}
+type socialProvidersResponse []socialProvider
 
-	// buf.WriteString(authResp.EncodeValues().Encode())
-
-	// http.Redirect(resp, req, buf.String(), http.StatusFound)
+func (server *Server) getSocialProviders(ctx context.Context) (resp socialProvidersResponse, err error) {
+	resp = make(socialProvidersResponse, len(server.socials))
+	i := 0
+	for _, p := range server.socials {
+		resp[i] = socialProvider{
+			Issuer: p.Config.Issuer,
+			// Picture: server.Addr + "ident/social-providers/" + p.Name + "/picture.png",
+		}
+		i++
+	}
+	return resp, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////

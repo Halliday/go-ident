@@ -17,3 +17,5 @@ type Scopes = openid.Scopes
 func NewScopes(str string) Scopes {
 	return openid.NewScopes(str)
 }
+
+const IdentAudience = "_ident"

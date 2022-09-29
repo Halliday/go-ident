@@ -31,4 +31,8 @@ err_prepare_email;5002;Can not prepare email '%s'.
 err_send_email;5003;Can not send email '%s'.
 email_sent;2004;Email '%s' sent.
 
+bad_token;400;Bad token.
+
 bad_store_sub;0;The storage returned a zero subject.
+
+missing_scope;401;Missing scope '%s'.

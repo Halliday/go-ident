@@ -4,7 +4,6 @@ import (
 	"html/template"
 	"net/http"
 	"net/smtp"
-	"strings"
 	"time"
 
 	_ "embed"
@@ -15,17 +14,20 @@ import (
 	"golang.org/x/net/context"
 )
 
+const Issuer = "iss"
 const Audience = "aud"
 const Subject = "sub"
 const ExpiresAt = "exp"
 const IssuedAt = "iat"
 
 type Server struct {
-	Addr string
-
 	*openid.Server
+
 	route   *router.Route
+	Api     map[string]http.Handler
 	socials map[string]*SocialProvider
+
+	ScopeAdmin string
 
 	SessionStore SessionStore
 	UserStore    UserStore
@@ -55,28 +57,80 @@ type Server struct {
 }
 
 type UserUpdate struct {
-	openid.Userinfo
+	Name       Option[string] `json:"name,omitempty"`
+	GivenName  Option[string] `json:"given_name,omitempty"`
+	FamilyName Option[string] `json:"family_name,omitempty"`
+	MiddleName Option[string] `json:"middle_name,omitempty"`
+	Nickname   Option[string] `json:"nickname,omitempty"`
 
-	NewPassword string
-	OldPassword string
+	PreferredUsername Option[string] `json:"preferred_username,omitempty"`
+	// requires priviliged scope
+	PreferredUsernameVerified Option[bool] `json:"preferred_username_verified,omitempty"`
+
+	Email Option[string] `json:"email,omitempty"`
+	// requires priviliged scope
+	EmailVerified Option[bool] `json:"email_verified,omitempty"`
+
+	Gender      Option[string] `json:"gender,omitempty"`
+	Birthdate   Option[string] `json:"birthdat,omitempty"`
+	Zoneinfo    Option[string] `json:"zoneinfo,omitempty"`
+	Locale      Option[string] `json:"locale,omitempty"`
+	PhoneNumber Option[string] `json:"phone_number,omitempty"`
+	// requires priviliged scope
+	PhoneNumberVerified Option[bool]    `json:"phone_number_verified,omitempty"`
+	Address             *openid.Address `json:"address,omitempty"`
+
+	// requires priviliged scope
+	Suspended Option[bool] `json:"suspended,omitempty"`
+
+	NewPassword Option[string] `json:"new_password,omitempty"`
+	// omitting this field requires priviliged scope
+	OldPassword Option[string] `json:"old_password,omitempty"`
+}
+
+func (u UserUpdate) MarshalJSON() ([]byte, error) {
+	return MarshalJSONOptionStruct(u)
+}
+
+type Selection struct {
+	All    bool     `json:"all,omitempty"`
+	Ids    []string `json:"ids,omitempty"`
+	Email  string   `json:"email,omitempty"`
+	Search string   `json:"search,omitempty"`
+}
+
+func (sel Selection) Empty() bool {
+	return !sel.All && len(sel.Ids) == 0 && sel.Email == "" && sel.Search == ""
+}
+
+type Userinfo = openid.Userinfo
+
+type User struct {
+	Userinfo
+
+	Suspended bool `json:"suspended,omitempty"`
+	// Rank float32 `json:"rank,omitempty"` // when searching for users
+
+	// only set when creating a new user
+	Password Option[string] `json:"password,omitempty"`
+
+	// SocialProviders map[string]string `json:"social_providers,omitempty"`
 }
 
 type UserStore interface {
 	openid.UserStore
 
-	LoginUser(ctx context.Context, username string, password string, scopes Scopes) (info *openid.Userinfo, grantedScopes Scopes, err error)
+	LoginUser(ctx context.Context, username string, password string) (sub string, err error)
 
-	UpdateUser(ctx context.Context, info *UserUpdate) (err error)
-	// UpdateUserPassword(ctx context.Context, sub string, password string) (err error)
-	// UpdateUserEmailVerified(ctx context.Context, sub string) (err error)
+	RegisterUsers(ctx context.Context, iss string, ignoreEmails bool, users []*User) (ids []string, err error)
 
-	RegisterUser(ctx context.Context, info *openid.Userinfo, password *string) (sub string, err error)
+	UpdateUsers(ctx context.Context, sel Selection, u *UserUpdate) (numUpdated int, err error)
 
-	RegisterSocialUser(ctx context.Context, social string, info *openid.Userinfo) (sub string, err error)
+	DeleteUsers(ctx context.Context, sel Selection) (numDeleted int, err error)
 
-	FindUserPasswordReset(ctx context.Context, email string) (*openid.Userinfo, error)
+	FindUsers(ctx context.Context, sel Selection, pageToken string, pageSize int) (users []*User, nextPageToken string, err error)
 
-	DeleteUsers(ctx context.Context, subs []string) (numDeleted int, err error)
+	CountUsers(ctx context.Context, sel Selection) (numSel int, numTotal int, err error)
 }
 
 type Store interface {
@@ -94,8 +148,9 @@ func NewServer(addr string, sessionStore SessionStore, userStore UserStore, soci
 	}
 
 	server := &Server{
-		Addr:         addr,
-		socials:      sps,
+		socials:    sps,
+		ScopeAdmin: "admin",
+
 		SessionStore: sessionStore,
 		UserStore:    userStore,
 
@@ -113,45 +168,61 @@ func NewServer(addr string, sessionStore SessionStore, userStore UserStore, soci
 		SendMail: smtp.SendMail,
 	}
 
+	server.Api = map[string]http.Handler{
+		"login":  rpc.MustNew(server.login),
+		"logout": rpc.MustNew(server.logout),
+
+		"register":              rpc.MustNew(server.register),
+		"complete-registration": rpc.MustNew(server.completeRegistration),
+
+		"instruct-password-reset": rpc.MustNew(server.instructPasswordReset),
+		"reset-password":          rpc.MustNew(server.resetPassword),
+
+		"instruct-email-change": rpc.MustNew(server.instructEmailChange),
+		"change-email":          rpc.MustNew(server.changeEmail),
+
+		"social-login": &router.Route{
+			Methods: map[string]http.Handler{
+				http.MethodGet:  rpc.MustNew(server.socialLogin),
+				http.MethodPost: rpc.MustNew(server.postSocialLogin),
+			},
+		},
+		"exchange-social-login": rpc.MustNew(server.exchangeSocialLogin),
+
+		"social-providers": &router.Route{
+			Methods: map[string]http.Handler{
+				http.MethodGet: rpc.MustNew(server.getSocialProviders),
+			},
+		},
+
+		"users": &router.Route{
+			Methods: map[string]http.Handler{
+				http.MethodGet:    rpc.MustNew(server.getUsers),
+				http.MethodPost:   rpc.MustNew(server.insertUsers),
+				http.MethodDelete: rpc.MustNew(server.deleteUsers),
+				http.MethodPatch:  rpc.MustNew(server.updateUsers),
+			},
+			Paths: map[string]http.Handler{
+				"self": &router.Route{
+					Methods: map[string]http.Handler{
+						http.MethodPatch:  rpc.MustNew(server.updateSelf),
+						http.MethodDelete: rpc.MustNew(server.deleteSelf),
+					},
+				},
+			},
+		},
+	}
+
 	server.route = &router.Route{
 		Paths: map[string]http.Handler{
 			"ident": &router.Route{
-				Paths: map[string]http.Handler{
-					"login": rpc.MustNew(server.login),
-
-					"begin-registration":    rpc.MustNew(server.beginRegistration),
-					"complete-registration": rpc.MustNew(server.completeRegistration),
-
-					"begin-reset-password":    rpc.MustNew(server.beginResetPassword),
-					"complete-reset-password": rpc.MustNew(server.completeResetPassword),
-
-					"begin-change-email":    rpc.MustNew(server.beginChangeEmail),
-					"complete-change-email": rpc.MustNew(server.completeChangeEmail),
-
-					// "change-password": rpc.MustNew(server.changePassword),
-
-					"delete-user": rpc.MustNew(server.deleteUser),
-
-					"social-login":          rpc.MustNew(server.socialLogin),
-					"complete-social-login": rpc.MustNew(server.completeSocialLogin),
-
-					"social-providers": &router.Route{
-						Methods: map[string]http.Handler{
-							http.MethodGet: rpc.MustNew(server.getSocialProviders),
-						},
-						// Paths: map[string]http.Handler{
-						// 	"login": rpc.MustNew(server.socialLogin),
-						// },
-					},
-
-					"update-user": rpc.MustNew(server.updateUser),
-				},
+				Paths: server.Api,
 			},
 		},
 		Next: next,
 	}
 
-	server.Server = openid.NewServer(addr, sessionStore, userStore, nil, server.route)
+	server.Server = openid.NewServer(addr, sessionStore, userStore, server.route)
 
 	return server
 }
@@ -166,10 +237,8 @@ type LoginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
 
-	ClientId     string `json:"clientId"`
-	Scope        string `json:"scope"`
-	Nonce        string `json:"nonce"`
-	ResponseType string `json:"responseType"`
+	Nonce string `json:"nonce,omitempty"`
+	Scope string `json:"scope,omitempty"`
 }
 
 type LoginResponse = openid.TokenResponse
@@ -177,166 +246,46 @@ type LoginResponse = openid.TokenResponse
 var ErrInvalidCredentials = e("invalid_credentials")
 var ErrNoUser = openid.ErrNoUser
 
+func (server *Server) Login(ctx context.Context, aud string, scopes []string, username string, password string, nonce string) (refreshToken string, accessToken string, grantedScopes []string, expiresIn int64, idToken string, err error) {
+	sub, err := server.UserStore.LoginUser(ctx, username, password)
+	if err != nil {
+		return "", "", nil, 0, "", err
+	}
+	if sub == "" {
+		return "", "", nil, 0, "", ErrInvalidCredentials
+	}
+	return server.CreateSession(ctx, aud, sub, scopes, nonce)
+}
+
 func (server *Server) login(ctx context.Context, req *LoginRequest) (resp *LoginResponse, err error) {
-	scopes := NewScopes(req.Scope)
-	user, grantedScopes, err := server.UserStore.LoginUser(ctx, req.Username, req.Password, scopes)
+	refreshToken, accessToken, scopes, expiresIn, idToken, err := server.Login(ctx, IdentAudience, NewScopes(req.Scope), req.Username, req.Password, req.Nonce)
 	if err != nil {
 		return nil, err
 	}
-	if user == nil {
-		return nil, ErrInvalidCredentials
-	}
-	if user.Email != "" && !user.EmailVerified {
-		return nil, e("email_unverified")
-	}
-	return server.Authorize(ctx, &openid.TokenRequest{
-		Subject:      user.Subject,
-		ClientId:     req.ClientId,
-		ResponseType: req.ResponseType,
-		Scope:        grantedScopes.String(),
-		Nonce:        req.Nonce,
-	})
+	return &LoginResponse{
+		RefreshToken: refreshToken,
+		AccessToken:  accessToken,
+		IdToken:      idToken,
+		ExpiresIn:    expiresIn,
+		Scope:        Scopes(scopes).String(),
+	}, nil
 }
 
-//
-
-// type AskResetPasswordRequest struct {
-// 	Email       string
-// 	RedirectUri string
-// }
-
-// func (server *Server) askResetPassword(ctx context.Context, req *AskResetPasswordRequest) (err error) {
-// 	user, err := server.UserStore.FindUserPasswordReset(ctx, req.Email)
-// 	if err != nil {
-// 		return err
-// 	}
-// 	go server.emailResetPassword(user, req.RedirectUri)
-// 	return nil
-// }
-
-//
-
-type socialProvider struct {
-	Issuer string `json:"iss"`
-	// Picture string `json:"picture"`
-}
-type socialProvidersResponse []socialProvider
-
-func (server *Server) getSocialProviders(ctx context.Context) (resp socialProvidersResponse, err error) {
-	resp = make(socialProvidersResponse, len(server.socials))
-	i := 0
-	for _, p := range server.socials {
-		resp[i] = socialProvider{
-			Issuer: p.Config.Issuer,
-			// Picture: server.Addr + "ident/social-providers/" + p.Name + "/picture.png",
-		}
-		i++
-	}
-	return resp, nil
+type LogoutRequest struct {
+	RefreshToken string `json:"refreshToken"`
 }
 
-////////////////////////////////////////////////////////////////////////////////
-
-const AudChangeEmail = "_change_email"
-
-func (server *Server) beginChangeEmail(ctx context.Context, email string) error {
-	sess := openid.CtxSession(ctx)
-	if sess == nil {
-		return e("unauthorized")
-	}
-	return server.BeginChangeEmail(ctx, sess.Subject, email)
-}
-
-func (server *Server) BeginChangeEmail(ctx context.Context, sub string, email string) (err error) {
-	user, err := server.UserStore.Userinfo(ctx, sub)
+func (server *Server) logout(ctx context.Context, req *LogoutRequest) (err error) {
+	aud, sess, err := server.ParseRefreshToken(req.RefreshToken)
 	if err != nil {
 		return err
 	}
-	if user.Email == "" {
-		return e("email_not_set")
-	}
-	go server.emailChangeEmail(user, email)
-	return nil
+	return server.SessionStore.RevokeSession(ctx, aud, sess)
 }
 
-type CompleteChangeEmailRequest struct {
-	Token string `json:"token"`
-}
+//
 
-type CompleteChangeEmailResponse struct {
-	Email string `json:"email"`
-}
-
-func (server *Server) completeChangeEmail(ctx context.Context, req *CompleteChangeEmailRequest) (resp *CompleteChangeEmailResponse, err error) {
-	claims, err := server.ParseToken(req.Token)
-	if err != nil {
-		return nil, err
-	}
-	if aud, _ := claims[Audience].(string); aud != AudChangeEmail {
-		return nil, e("invalid_aud")
-	}
-	sub, _ := claims[Subject].(string)
-	email, _ := claims["email"].(string)
-	info := &UserUpdate{
-		Userinfo: openid.Userinfo{
-			Subject:       sub,
-			Email:         email,
-			EmailVerified: true,
-		},
-	}
-	err = server.UserStore.UpdateUser(ctx, info)
-	if err != nil {
-		return nil, err
-	}
-	resp = &CompleteChangeEmailResponse{
-		Email: email,
-	}
-	return resp, nil
-}
-
-func (server *Server) emailChangeEmail(user *openid.Userinfo, email string) {
-	token, err := server.CreateToken(map[string]interface{}{
-		Audience: AudChangeEmail,
-		Subject:  user.Subject,
-		"email":  email,
-	})
-	if err != nil {
-		l.Err("err_prepare_token", "change-email", err)
-		return
-	}
-
-	var b strings.Builder
-	b.WriteString(server.Config.AuthorizationEndpoint)
-	if strings.Contains(server.Config.AuthorizationEndpoint, "?") {
-		b.WriteByte('&')
-	} else {
-		b.WriteByte('?')
-	}
-	b.WriteString("change_email_token=")
-	b.WriteString(token)
-
-	redirectUri := b.String()
-
-	addr, auth, msg, err := server.prepareMail(server.ChangeEmailSubject, user.Email, server.ChangeEmailTemplate, &Email{
-		Userinfo:    user,
-		RedirectUri: redirectUri,
-	})
-	if err != nil {
-		l.Err("err_prepare_email", "change-email", err)
-		return
-	}
-
-	to := []string{email}
-	start := time.Now()
-	err = server.SendMail(addr, auth, server.EmailFrom, to, msg)
-	duration := time.Since(start)
-	if err != nil {
-		l.Err("err_send_email", "change-email", err, "Email", email, "Username", user.PreferredUsername, "Locale", user.Locale, "Timing", duration)
-		return
-	}
-
-	l.Info("email_sent", "change-email", "Email", email, "Username", user.PreferredUsername, "Locale", user.Locale, "Timing", duration)
-}
+////////////////////////////////////////////////////////////////////////////////
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -359,61 +308,155 @@ func mustParseTemplate(name string, data string) *template.Template {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// type ChangePasswordRequest struct {
-// 	OldPassword string `json:"oldPassword"`
-// 	NewPassword string `json:"newPassword"`
-// }
+type UpdateUsersRequest struct {
+	Selection  Selection  `json:"sel"`
+	UserUpdate UserUpdate `json:"update"`
+}
 
-// func (server *Server) changePassword(ctx context.Context, req *ChangePasswordRequest) error {
-// 	sess := openid.CtxSession(ctx)
-// 	if sess == nil {
-// 		return e("unauthorized")
-// 	}
-// 	if req.OldPassword == "" || req.NewPassword == "" {
-// 		return e("bad_request")
-// 	}
-// 	info := &UserinfoUpdate{
-// 		Userinfo: openid.Userinfo{
-// 			Subject: sess.Subject,
-// 		},
-// 		OldPassword: req.OldPassword,
-// 		NewPassword: req.NewPassword,
-// 	}
-// 	return server.UserStore.UpdateUser(ctx, info)
-// }
+type UpdateUserResponse struct {
+	NumUpdated int `json:"numUpdated"`
+}
 
-func (server *Server) updateUser(ctx context.Context, info *UserUpdate) error {
+func (server *Server) updateUsers(ctx context.Context, u *UpdateUsersRequest) (resp *UpdateUserResponse, err error) {
+	if !openid.CtxSession(ctx).HasScope(server.ScopeAdmin) {
+		return nil, e("missing_scope", server.ScopeAdmin)
+	}
+	resp = new(UpdateUserResponse)
+	resp.NumUpdated, err = server.UserStore.UpdateUsers(ctx, u.Selection, &u.UserUpdate)
+	return resp, err
+}
+
+func (server *Server) updateSelf(ctx context.Context, u *UserUpdate) error {
 	sess := openid.CtxSession(ctx)
 	if sess == nil {
 		return e("unauthorized")
 	}
-	if info.Subject != "" || info.CreatedAt != 0 || // read-only
-		info.SocialProviders != nil || info.UpdatedAt != 0 || // read-only
-		(info.OldPassword != "" && info.NewPassword == "") { // must be set together
+
+	if u.EmailVerified.Valid || u.PreferredUsernameVerified.Valid || u.PhoneNumberVerified.Valid {
+		// those fields are not updatable by the user
 		return e("bad_request")
 	}
 
-	if info.Email != "" {
-		if err := server.BeginChangeEmail(ctx, sess.Subject, info.Email); err != nil {
-			return err
-		}
-		info.Email = ""
+	if u.NewPassword.Valid && !u.OldPassword.Valid {
+		// this fields can only be used together
+		return e("bad_request")
 	}
 
-	info.Subject = sess.Subject
-	info.PreferredUsernameVerified = false
-	info.EmailVerified = false
-	info.PhoneNumberVerified = false
-	return server.UserStore.UpdateUser(ctx, info)
+	if u.Email.Valid {
+		// users need to use the instruct-change-email endpoint to change their email
+		u.EmailVerified = NewOption(false)
+	}
+
+	if u.PreferredUsername.Valid {
+		u.PreferredUsernameVerified = NewOption(false)
+	}
+
+	if u.PhoneNumber.Valid {
+		u.PhoneNumberVerified = NewOption(false)
+	}
+
+	count, err := server.UserStore.UpdateUsers(ctx, Selection{Ids: []string{sess.Subject}}, u)
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrNoUser
+	}
+	return nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-func (server *Server) deleteUser(ctx context.Context) error {
+type DeleteUsersRequest = Selection
+
+type DeleteUserResponse struct {
+	NumDeleted int `json:"numDeleted"`
+}
+
+func (server *Server) deleteUsers(ctx context.Context, req *DeleteUsersRequest) (resp *DeleteUserResponse, err error) {
+	if !openid.CtxSession(ctx).HasScope(server.ScopeAdmin) {
+		return nil, e("missing_scope", server.ScopeAdmin)
+	}
+	resp = new(DeleteUserResponse)
+	resp.NumDeleted, err = server.UserStore.DeleteUsers(ctx, *req)
+	return resp, err
+}
+
+func (server *Server) deleteSelf(ctx context.Context) error {
 	sess := openid.CtxSession(ctx)
 	if sess == nil {
 		return e("unauthorized")
 	}
-	_, err := server.UserStore.DeleteUsers(ctx, []string{sess.Subject})
-	return err
+	count, err := server.UserStore.DeleteUsers(ctx, Selection{Ids: []string{sess.Subject}})
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		// the user might be deleted already, so we don't return an error
+		return nil
+	}
+	return nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type GetUsersRequest struct {
+	Selection
+	PageToken string `json:"pageToken"`
+	PageSize  int    `json:"pageSize"`
+}
+
+type GetUsersResponse struct {
+	Users         []*User `json:"users"`
+	NumFound      int     `json:"numFound"`
+	NumTotal      int     `json:"numTotal"`
+	NextPageToken string  `json:"nextPageToken,omitempty"`
+}
+
+func (server *Server) getUsers(ctx context.Context, req *GetUsersRequest) (resp *GetUsersResponse, err error) {
+	if !openid.CtxSession(ctx).HasScope(server.ScopeAdmin) {
+		return nil, e("missing_scope", server.ScopeAdmin)
+	}
+	users, nextPageToken, err := server.UserStore.FindUsers(ctx, req.Selection, req.PageToken, req.PageSize)
+	if err != nil {
+		return nil, err
+	}
+	resp = new(GetUsersResponse)
+	resp.Users = users
+	resp.NextPageToken = nextPageToken
+	if req.PageSize > 0 && len(users) < req.PageSize && req.PageToken == "" {
+		resp.NumFound = len(users)
+		resp.NumTotal = len(users)
+	} else {
+		resp.NumFound, resp.NumTotal, err = server.UserStore.CountUsers(ctx, req.Selection)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return resp, nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type InsertUsersRequest struct {
+	Users        []*User `json:"users"`
+	Issuer       string  `json:"iss"`
+	IgnoreEmails bool    `json:"ignoreEmails"`
+}
+
+type InsertUsersResponse struct {
+	Ids []string `json:"ids"`
+}
+
+func (server *Server) insertUsers(ctx context.Context, req *InsertUsersRequest) (resp *InsertUsersResponse, err error) {
+	if !openid.CtxSession(ctx).HasScope(server.ScopeAdmin) {
+		return nil, e("missing_scope", server.ScopeAdmin)
+	}
+	resp = new(InsertUsersResponse)
+	resp.Ids, err = server.UserStore.RegisterUsers(ctx, req.Issuer, req.IgnoreEmails, req.Users)
+	if err != nil {
+		return nil, err
+	}
+	return resp, err
+
 }
