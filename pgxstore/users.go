@@ -113,37 +113,6 @@ func (s *socialProvider) DecodeBinary(ci *pgtype.ConnInfo, src []byte) error {
 	return nil
 }
 
-func (store *Store) UpdateUserPassword(ctx context.Context, sub string, password string) (err error) {
-	id, err := uuid.Parse(sub)
-	if err != nil {
-		return ident.ErrNoUser
-	}
-
-	var hashedPassword []byte
-	if password != "" {
-		hashedPassword, err = bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-		if err != nil {
-			return err
-		}
-	}
-
-	var numPasswordReset int
-	err = store.Pool.QueryRow(ctx, `
-		UPDATE "`+store.UsersTableName+`"
-		SET hashed_password = $1, password_updated_at = NOW(), num_password_updates = num_password_updates+1
-		WHERE id = $2
-		RETURNING num_password_updates`, pgxResultFormatsBinary, string(hashedPassword), id.String()).Scan(&numPasswordReset)
-
-	if err != nil {
-		if err == pgx.ErrNoRows {
-			return ident.ErrNoUser
-		}
-		return err
-	}
-
-	return nil
-}
-
 func (store *Store) RegisterSocialUsers(ctx context.Context, iss string, users []*ident.User) (subs []string, err error) {
 	if len(users) == 0 {
 		return nil, nil
