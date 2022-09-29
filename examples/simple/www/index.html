@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>index.html</title>
+    <style>
+        label {
+            display: inline-block;
+            width: 120px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Session</h1>
+    <form id="session">
+        <label for="refresh_token">Refresh Token</label>
+        <input type="text" name="refresh_token" disabled><br>
+        <label for="access_token">Access Token</label>
+        <input type="text" name="access_token" disabled><br>
+        <label for="expires_in">Expires In</label>
+        <input type="text" name="expires_in" disabled><br>
+        <label for="scope">Scope</label>
+        <input type="text" name="scope" disabled><br>
+        <label for="id_token">ID Token</label>
+        <input type="text" name="id_token" disabled><br>
+        <label for="issued_at">Issued At</label>
+        <input type="text" name="issued_at" disabled>
+    </form>
+    <button id="revoke" disabled>Revoke / Logout</button>
+    <button id="refresh" disabled>Refresh</button>
+    <button id="userinfo" disabled>Userinfo</button>
+    See browser console for more details.
+    <hr>
+
+    <h1>Change password</h1>
+    <form id="change_pw">
+        <label for="old_password">Old Password</label>
+        <input type="password" name="old_password" disabled><br><br>
+        <label for="password">New Password</label>
+        <input type="password" name="password" disabled><br><br>
+        <button type="submit" name="submit" disabled>Submit</button>
+    </form>
+    <hr>
+
+    <h1>Register</h1>
+    <form id="register">
+        <label for="preferred_username">Username</label>
+        <input type="text" name="preferred_username"><br>
+        <label for="email">Email</label>
+        <input type="text" name="email"><br>
+        <label for="password">Password</label>
+        <input type="password" name="password"><br>
+        <button type="submit">Register</button>
+    </form>
+    <hr>
+
+    <h1>Login</h1>
+    <form id="login">
+        <label for="email">Email</label>
+        <input type="text" name="email"><br>
+        <label for="password">Password</label>
+        <input type="password" name="password"><br>
+        <button type="submit">Login</button>
+    </form>
+    <hr>
+
+    <h2>Social Provider</h2>
+    <ul id="providers"></ul>
+    <hr>
+
+    <h1>Reset password</h1>
+    <form id="reset">
+        <label for="email">Email</label>
+        <input type="text" name="email"><br>
+        <button type="submit">Submit</button>
+    </form>
+    <hr>
+
+    <h1>Reset password now</h1>
+    <form id="reset_now">
+        <label for="username">Email</label>
+        <input type="text" name="username"><br><br>
+        <label for="password">New Password</label>
+        <input type="password" name="password"><br><br>
+        <button type="submit" name="submit">Submit</button>
+    </form>
+    <hr>
+
+    <script>
+        const about = document.getElementById('session');
+        const btnRevoke = document.getElementById('revoke');
+        const btnRefresh = document.getElementById('refresh');
+        const btnUserinfo = document.getElementById('userinfo');
+        const submitChangePw = document.querySelector('#change_pw button');
+        const formChangePw = document.getElementById("change_pw");
+        const btnChangePw = formChangePw.elements.submit
+
+        let session;
+
+        function reload() {
+            sess = loadSession();
+            console.log("Session:", sess);
+            about.elements.refresh_token.value = sess ? sess.refresh_token : "";
+            about.elements.access_token.value = sess ? sess.access_token : "";
+            about.elements.expires_in.value = sess ? sess.expires_in : "";
+            about.elements.scope.value = sess ? sess.scope : "";
+            about.elements.id_token.value = sess ? sess.id_token : "";
+            about.elements.issued_at.value = sess ? new Date(sess.issued_at * 1000).toLocaleString() : "";
+            btnRevoke.disabled = !sess;
+            btnRefresh.disabled = !sess;
+            btnUserinfo.disabled = !sess;
+
+            formChangePw.elements.old_password.disabled = !sess;
+            formChangePw.elements.password.disabled = !sess;
+            submitChangePw.disabled = !sess;
+        }
+
+        reload();
+        loadSocialProviders();
+
+        btnRevoke.addEventListener("click", () => {
+            const refresh_token = sess.refresh_token;
+            fetch("/ident/logout", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ refresh_token })
+            }).then((resp) => {
+                if (resp.ok) {
+                    localStorage.removeItem("session");
+                    alert("Logout complete.");
+                    location.reload();
+                } else {
+                    alert("Logout could not be completed:\n" + resp.statusText);
+                }
+            });
+        });
+
+        btnRefresh.addEventListener("click", () => {
+            fetch("/token", {
+                method: "POST",
+                body: new URLSearchParams({
+                    grant_type: "refresh_token",
+                    refresh_token: sess.refresh_token,
+                    scope: "*"
+                })
+            }).then((resp) => {
+                if (resp.ok) {
+                    resp.json().then((data) => {
+                        data.refresh_token = sess.refresh_token;
+                        data.id_token = sess.id_token;
+                        storeSession(data);
+                        alert("Refresh complete.");
+                        reload();
+                    });
+                } else {
+                    alert("Session could not be refreshed:\n" + resp.statusText);
+                }
+            });
+        });
+
+        btnUserinfo.addEventListener("click", () => {
+            fetch("/userinfo", {
+                method: "GET",
+                headers: {
+                    "Authorization": "Bearer " + sess.access_token
+                }
+            }).then((resp) => {
+                if (resp.ok) {
+                    resp.json().then((userinfo) => {
+                        console.log("Userinfo:", userinfo);
+                        alert("Hello "+userinfo.preferred_username+"!\nEmail: "+userinfo.email+"\nFor more fields see browser console.");
+                    });
+                } else {
+                    alert("Userinfo could not be fetched:\n" + resp.statusText);
+                }
+            });
+        });
+
+
+        const change_pw = document.getElementById("change_pw");
+        change_pw.addEventListener("submit", (ev) => {
+            ev.preventDefault();
+            const oldPassword = reset.elements.old_password.value;
+            const password = reset.elements.password.value;
+            fetch("/ident/userinfo", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ password: password, oldPassword })
+            }).then((resp) => {
+                if (resp.ok) {
+                    alert("Your password has been changed.");
+                } else {
+                    alert("The password could not be changed:\n" + resp.statusText);
+                }
+            })
+        });
+
+
+        const search = new URLSearchParams(location.search);
+        const hash = new URLSearchParams(location.hash.substr(1));
+        // const query = new URLSearchParams(location.search);
+        // const knownQueryFields = ["client_id", "response_type", "scope", "state", "redirect_uri", "nonce"];
+        // for (const field of query.keys()) if (!knownQueryFields.includes(field)) query.delete(field);
+
+        // const socialTest1 = document.getElementById("social-test1");
+        // socialTest1.href = "/social/test1?" + query.toString();
+
+        const register = document.getElementById("register");
+        register.addEventListener("submit", (ev) => {
+            ev.preventDefault();
+            const preferred_username = register.elements.preferred_username.value;
+            const email = register.elements.email.value;
+            const password = register.elements.password.value;
+            const locale = "en_US";
+            const redirect_uri = "/";
+            const scope = "openid";
+            fetch("/ident/begin-registration", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ preferred_username, email, password, locale, redirect_uri, scope })
+            }).then((resp) => {
+                if (resp.ok) {
+                    alert("You have been registered.");
+                    fetch("/ident/login", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({ username: email, password })
+                    }).then((resp) => {
+                        if (resp.ok) {
+                            resp.json().then((data) => {
+                                storeSession(data);
+                                reload();
+                            });
+                        } else {
+                            alert("Login could not be completed:\n" + resp.statusText);
+                        }
+                    });
+                } else {
+                    alert("Registration failed.\n" + resp.statusText);
+                }
+            })
+        });
+
+        const login = document.getElementById("login");
+        login.addEventListener("submit", (ev) => {
+            ev.preventDefault();
+            const username = login.elements.email.value;
+            const password = login.elements.password.value;
+            const redirectUri = search.get("redirect_uri");
+            fetch("/ident/login", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ username, password })
+            }).then((resp) => {
+                if (resp.ok) {
+                    resp.json().then((data) => {
+                        storeSession(data);
+                        alert("Login complete.");
+                        reload();
+                    });
+                } else {
+                    alert("Login could not be completed:\n" + resp.statusText);
+                }
+            });
+        });
+
+        const reset = document.getElementById("reset");
+        reset.addEventListener("submit", (ev) => {
+            ev.preventDefault();
+            const email = reset.elements.email.value;
+            const redirect_uri = "/";
+            fetch("/ident/begin-reset-password", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ email, redirect_uri })
+            }).then((resp) => {
+                if (resp.ok) {
+                    alert("A email has been sent Please check your emails.");
+                } else {
+                    alert("The password could not be reset:\n" + resp.statusText);
+                }
+            })
+        });
+
+        const registrationToken = search.get("registration_token");
+        if (registrationToken) {
+            const redirectUri = search.get("redirect_uri");
+            fetch("/ident/complete-registration", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ registrationToken, redirectUri })
+            }).then((resp) => {
+                if (resp.ok) {
+                    alert("Registration complete.");
+                    location.replace(location.origin+location.pathname);
+                } else {
+                    alert("The registration could not be completed:\n" + resp.statusText);
+                }
+            });
+        }
+
+        const resetPasswordToken = search.get("reset_password_token");
+        const reset_now = document.getElementById("reset_now");
+        if (resetPasswordToken) {
+            const redirectUri = search.get("redirect_uri");
+
+            reset_now.elements.password.disabled = false;
+            reset_now.elements.submit.disabled = false;
+
+            const claims = JSON.parse(atob(resetPasswordToken.split(".")[1]));
+            const email = claims.email;
+            reset_now.elements.username.value = email;
+
+            reset_now.addEventListener("submit", (ev) => {
+                ev.preventDefault();
+                const password = reset_now.elements.password.value;
+                fetch("/ident/complete-reset-password", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({ password, redirectUri, resetPasswordToken })
+                }).then((resp) => {
+                    if (resp.ok) {
+                        alert("Password change complete. You can login with your new password now.");
+                    location.replace(location.origin+location.pathname);
+                    } else {
+                        alert("The password change could not be completed:\n" + resp.statusText);
+                    }
+                });
+            });
+        }
+
+        // response_type=code
+        // see https://www.rfc-editor.org/rfc/rfc6749#section-4.1.2
+        const code = search.get("code") ?? hash.get("code") ?? undefined;
+        // response_type=token
+        // see https://www.rfc-editor.org/rfc/rfc6749#section-4.2.2
+        const access_token = search.get("access_token") ?? hash.get("access_token") ?? undefined;
+        const token_type = search.get("token_type") ?? hash.get("token_type") ?? undefined;
+        const expires_in = search.get("expires_in") ?? hash.get("expires_in") ?? undefined;
+        const scope = search.get("scope") ?? hash.get("scope") ?? undefined;
+        const id_token = search.get("id_token") ?? hash.get("id_token") ?? undefined;
+
+        const state = search.get("state") ?? hash.get("state") ?? undefined;
+
+        if (code || access_token || id_token) {
+            const params = new URLSearchParams(state);
+            const redirectUri = params.get("redirect_uri");
+            fetch("/ident/complete-social-login", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    scope: "*",
+                    none: "",
+                    auth: { code, access_token, token_type, expires_in: expires_in ? parseInt(expires_in) : undefined, scope, id_token, state }
+                })
+            }).then((resp) => {
+                if (resp.ok) {
+                    resp.json().then((data) => {
+                        storeSession(data);
+                        alert("Social login complete.");
+                        location.replace(location.origin+location.pathname);
+                        reload();
+                    });
+                } else {
+                    alert("The social login failed:\n" + resp.statusText);
+                }
+            });
+        }
+
+
+        function storeSession(data) {
+            const v = new URLSearchParams();
+            v.set("refresh_token", data.refresh_token);
+            v.set("access_token", data.access_token);
+            v.set("expires_in", data.expires_in.toString());
+            v.set("scope", data.scope);
+            if (data.id_token) v.set("id_token", data.id_token);
+            v.set("issued_at", Math.floor(new Date().getTime() / 1000).toString());
+            localStorage.setItem("session", v.toString());
+        }
+
+        function loadSession() {
+            const sess = localStorage.getItem("session");
+            if (!sess) return;
+            const v = new URLSearchParams(sess);
+            const refresh_token = v.get("refresh_token");
+            const access_token = v.get("access_token");
+            const expires_in = parseInt(v.get("expires_in"));
+            const scope = v.get("scope");
+            const id_token = v.get("id_token");
+            const issued_at = parseInt(v.get("issued_at"));
+            const expired = issued_at + expires_in < Math.floor(new Date().getTime() / 1000);
+            const userinfo = id_token ? JSON.parse(atob(id_token.split(".")[1])) : null;
+            return { refresh_token, access_token, expires_in, scope, id_token, issued_at, expired, ...userinfo };
+        }
+
+        function loadSocialProviders() {
+            fetch("/ident/social-providers").then((resp) => {
+                if (resp.ok) {
+                    resp.json().then((data) => {
+                        const providers = document.getElementById("providers");
+                        data.forEach((provider) => {
+                            const a = document.createElement("a");
+                            a.href = "/ident/social-login?iss=" + encodeURIComponent(provider.iss);
+                            a.innerText = provider.iss;
+                            const li = document.createElement("li");
+                            li.appendChild(a);
+                            providers.appendChild(li);
+                        });
+                    });
+                } else {
+                    alert("Could not load social providers:\n" + resp.statusText);
+                }
+            });
+        }
+    </script>
+</body>
+
+</html>
