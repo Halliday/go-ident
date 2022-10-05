@@ -105,16 +105,27 @@ func (sel Selection) Empty() bool {
 
 type Userinfo = openid.Userinfo
 
+type Social struct {
+	Iss     string `json:"iss"`
+	Profile string `json:"profile,omitempty"`
+	Website string `json:"website,omitempty"`
+	Picture string `json:"picture,omitempty"`
+}
+
 type User struct {
 	Userinfo
 
 	Suspended bool `json:"suspended,omitempty"`
-	// Rank float32 `json:"rank,omitempty"` // when searching for users
 
-	// only set when creating a new user
+	Socials []Social `json:"socials,omitempty"`
+}
+
+type NewUser struct {
+	Userinfo
+
+	Suspended bool `json:"suspended,omitempty"`
+
 	Password Option[string] `json:"password,omitempty"`
-
-	// SocialProviders map[string]string `json:"social_providers,omitempty"`
 }
 
 type UserStore interface {
@@ -122,7 +133,7 @@ type UserStore interface {
 
 	LoginUser(ctx context.Context, username string, password string) (sub string, err error)
 
-	RegisterUsers(ctx context.Context, iss string, ignoreEmails bool, users []*User) (ids []string, err error)
+	RegisterUsers(ctx context.Context, iss string, ignoreEmails bool, users []*NewUser) (ids []string, err error)
 
 	UpdateUsers(ctx context.Context, sel Selection, u *UserUpdate) (numUpdated int, err error)
 
@@ -138,7 +149,10 @@ type Store interface {
 	SessionStore
 }
 
-type SessionStore = openid.SessionStore
+type SessionStore interface {
+	openid.SessionStore
+	UpdateSessions(ctx context.Context, sess string, sub string, addScopes []string, removeScopes []string) (numUpdated int, err error)
+}
 
 func NewServer(addr string, sessionStore SessionStore, userStore UserStore, socials []*SocialProvider, next http.Handler) *Server {
 
@@ -211,6 +225,12 @@ func NewServer(addr string, sessionStore SessionStore, userStore UserStore, soci
 				},
 			},
 		},
+
+		"sessions": &router.Route{
+			Methods: map[string]http.Handler{
+				http.MethodPatch: rpc.MustNew(server.updateSessions),
+			},
+		},
 	}
 
 	server.route = &router.Route{
@@ -254,7 +274,11 @@ func (server *Server) Login(ctx context.Context, aud string, scopes []string, us
 	if sub == "" {
 		return "", "", nil, 0, "", ErrInvalidCredentials
 	}
-	return server.CreateSession(ctx, aud, sub, scopes, nonce)
+	grantedScopes, err = server.GrantScopes(ctx, aud, sub, scopes)
+	if err != nil {
+		return "", "", nil, 0, "", err
+	}
+	return server.CreateSession(ctx, aud, sub, grantedScopes, nonce)
 }
 
 func (server *Server) login(ctx context.Context, req *LoginRequest) (resp *LoginResponse, err error) {
@@ -276,11 +300,11 @@ type LogoutRequest struct {
 }
 
 func (server *Server) logout(ctx context.Context, req *LogoutRequest) (err error) {
-	aud, sess, err := server.ParseRefreshToken(req.RefreshToken)
+	_, sess, err := server.ParseRefreshToken(req.RefreshToken)
 	if err != nil {
 		return err
 	}
-	return server.SessionStore.RevokeSession(ctx, aud, sess)
+	return server.SessionStore.RevokeSession(ctx, sess)
 }
 
 //
@@ -439,9 +463,9 @@ func (server *Server) getUsers(ctx context.Context, req *GetUsersRequest) (resp 
 ////////////////////////////////////////////////////////////////////////////////
 
 type InsertUsersRequest struct {
-	Users        []*User `json:"users"`
-	Issuer       string  `json:"iss"`
-	IgnoreEmails bool    `json:"ignoreEmails"`
+	Users        []*NewUser `json:"users"`
+	Issuer       string     `json:"iss"`
+	IgnoreEmails bool       `json:"ignoreEmails"`
 }
 
 type InsertUsersResponse struct {

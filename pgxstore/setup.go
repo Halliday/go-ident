@@ -94,7 +94,7 @@ func (store *Store) CreateTableSocialUsers(ctx context.Context) error {
 func (store *Store) CreateTableSessions(ctx context.Context) error {
 	_, err := store.Pool.Exec(ctx, `
 		CREATE TABLE IF NOT EXISTS "`+store.SessionsTableName+`" (
-			id uuid NOT NULL DEFAULT gen_random_uuid(),
+			id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 			sub uuid NOT NULL REFERENCES "`+store.UsersTableName+`" ON DELETE CASCADE,
 			created_at timestamp NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),
 			refreshed_at timestamp NOT NULL DEFAULT (NOW() AT TIME ZONE 'utc'),

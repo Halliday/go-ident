@@ -221,7 +221,7 @@ func (server *Server) exchangeSocialLogin(ctx context.Context, req *ExchangeSoci
 	// 	info.EmailVerified = true
 	// }
 
-	subs, err := server.UserStore.RegisterUsers(ctx, iss, false, []*User{{Userinfo: *info}})
+	subs, err := server.UserStore.RegisterUsers(ctx, iss, false, []*NewUser{{Userinfo: *info}})
 	if err != nil {
 		return nil, err
 	}

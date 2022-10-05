@@ -117,6 +117,8 @@ github.com/halliday/go-module v0.0.0-20220929094355-c26133bcf695 h1:55CryhLYosUq
 github.com/halliday/go-module v0.0.0-20220929094355-c26133bcf695/go.mod h1:clQWf+zSfJyn8XB/JSQ9q07SHb7Yrt5P3OO/5VI3Fxk=
 github.com/halliday/go-openid v0.0.0-20220929094932-186197b4601c h1:ZK94LdqNsZQLBoQ5Qt0pVrEu0Ut1Osl6S8+GFm0+5A8=
 github.com/halliday/go-openid v0.0.0-20220929094932-186197b4601c/go.mod h1:odmQ0M+INDBKYisBVGkRAGSU3Fq6Ihv/Wjuz8gkyfCM=
+github.com/halliday/go-openid v0.0.0-20221005162019-afe9c33cb33b h1:ogtVqgSI5c6bdLWM+qdviEBRMDdI3ApvL94pbYkxLb8=
+github.com/halliday/go-openid v0.0.0-20221005162019-afe9c33cb33b/go.mod h1:odmQ0M+INDBKYisBVGkRAGSU3Fq6Ihv/Wjuz8gkyfCM=
 github.com/halliday/go-router v0.0.0-20220713092306-5ee672c884d9 h1:dekpnTW1XJI8qweQ43qdcEdRdqC4KYwQ1mZhnDxWCCc=
 github.com/halliday/go-router v0.0.0-20220713092306-5ee672c884d9/go.mod h1:2SqNckYmGYeJ8ZLCSY5ZQgdBCXde4VzetGcFT1Yfa2w=
 github.com/halliday/go-rpc v0.0.0-20220713092510-806c8caa56d4 h1:yEvhO3h6rW/RctKDPNRxZWCiQigUOR9vWltlAPzvK2s=

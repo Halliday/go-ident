@@ -18,7 +18,7 @@ func TestStore(t *testing.T) {
 
 	store := createStore(t)
 
-	subs, err := store.RegisterUsers(ctx, "", false, []*ident.User{
+	subs, err := store.RegisterUsers(ctx, "", false, []*ident.NewUser{
 		{
 			Userinfo: ident.Userinfo{
 				Subject:           adminId,

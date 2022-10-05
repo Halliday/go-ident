@@ -113,7 +113,7 @@ func (s *socialProvider) DecodeBinary(ci *pgtype.ConnInfo, src []byte) error {
 	return nil
 }
 
-func (store *Store) RegisterSocialUsers(ctx context.Context, iss string, users []*ident.User) (subs []string, err error) {
+func (store *Store) RegisterSocialUsers(ctx context.Context, iss string, users []*ident.NewUser) (subs []string, err error) {
 	if len(users) == 0 {
 		return nil, nil
 	}
@@ -134,7 +134,7 @@ func (store *Store) RegisterSocialUsers(ctx context.Context, iss string, users [
 		return nil, err
 	}
 
-	unregisteredUsers := make([]*ident.User, 0, len(users))
+	unregisteredUsers := make([]*ident.NewUser, 0, len(users))
 	unregisteredUsersIdx := make([]int, 0, len(users))
 
 	// ids := make([]pgtype.UUID, len(users))
@@ -230,7 +230,7 @@ func (store *Store) RegisterSocialUsers(ctx context.Context, iss string, users [
 
 var localeRegexp = regexp.MustCompile(`^[a-zA-Z]{2}([_-][a-zA-Z]{2})?$`)
 
-func (store *Store) RegisterUsers(ctx context.Context, iss string, ignoreEmails bool, users []*ident.User) (subs []string, err error) {
+func (store *Store) RegisterUsers(ctx context.Context, iss string, ignoreEmails bool, users []*ident.NewUser) (subs []string, err error) {
 
 	if iss != "" {
 		return store.RegisterSocialUsers(ctx, iss, users)
@@ -542,10 +542,11 @@ func (store *Store) DeleteUsers(ctx context.Context, sel ident.Selection) (count
 	b.WriteString(`" `)
 	b.WriteSelection(sel)
 
-	err = store.Pool.QueryRow(ctx, b.String(), b.args...).Scan(&count)
+	tag, err := store.Pool.Exec(ctx, b.String(), b.args...)
 	if err != nil {
 		return 0, err
 	}
+	count = int(tag.RowsAffected())
 	return count, nil
 }
 

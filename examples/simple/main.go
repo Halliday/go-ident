@@ -24,7 +24,7 @@ func main() {
 
 	server := createServer()
 
-	_, err := server.UserStore.RegisterUsers(ctx, "", true, []*ident.User{
+	_, err := server.UserStore.RegisterUsers(ctx, "", true, []*ident.NewUser{
 		{
 			Userinfo: ident.Userinfo{
 				Subject:           adminId,
@@ -70,44 +70,58 @@ func connectDatabase() *pgxpool.Pool {
 	return pool
 }
 
-type DummyStore struct {
-	*pgxstore.Store
+var www = http.FileServer(http.Dir("www"))
+
+//
+
+type MyServer struct {
+	*ident.Server
 }
 
-func (s *DummyStore) CreateSession(ctx context.Context, aud string, sub string, scopes []string) (sess string, grantedScopes []string, err error) {
-	scopes, err = s.GrantScopes(ctx, aud, sub, scopes)
-	if err != nil {
-		return "", nil, err
+func createServer() *MyServer {
+	store := createStore()
+
+	myStore := &MyStore{store}
+
+	socials := []*ident.SocialProvider{
+		{
+			ClientId:     "solution-lab-1",
+			ClientSecret: "123456",
+			Config:       openid.MustDiscover("https://login.waziup.io/auth/realms/waziup"),
+		},
 	}
-	return s.Store.CreateSession(ctx, aud, sub, scopes)
+
+	server := ident.NewServer(issuer, myStore, myStore, socials, www)
+
+	server.Config.AuthorizationEndpoint = "http://localhost:3000/"
+
+	server.SendMail = PrintEmailToLog
+
+	myServer := &MyServer{server}
+
+	server.GrantScopes = myServer.GrantScopes
+
+	return myServer
 }
 
-func (s *DummyStore) RefreshSession(ctx context.Context, aud string, sess string, scopes []string) (sub string, grantedScopes []string, err error) {
-	if scopes != nil {
-		sub, _, err := s.Store.GetSession(ctx, aud, sess)
-		if err != nil {
-			return "", nil, err
-		}
-		scopes, err = s.GrantScopes(ctx, aud, sub, scopes)
-		if err != nil {
-			return "", nil, err
-		}
-	}
-	return s.Store.RefreshSession(ctx, aud, sess, scopes)
-}
-
-func (s *DummyStore) GrantScopes(ctx context.Context, aud string, sub string, scopes []string) (grantedScopes []string, err error) {
-	info, err := s.Userinfo(ctx, sub)
+func (s *MyServer) GrantScopes(ctx context.Context, aud string, sub string, scopes []string) (grantedScopes []string, err error) {
+	info, err := s.UserStore.Userinfo(ctx, sub)
 	if err != nil {
 		return nil, err
 	}
 	if info.Subject == adminId {
-		return []string{"admin", "user", "openid"}, nil
+		return []string{"admin", "openid"}, nil
 	}
 	if info.EmailVerified {
-		return []string{"user", "openid"}, nil
+		return []string{"member", "openid"}, nil
 	}
 	return []string{"openid"}, nil
+}
+
+//
+
+type MyStore struct {
+	*pgxstore.Store
 }
 
 func createStore() *pgxstore.Store {
@@ -127,30 +141,20 @@ func createStore() *pgxstore.Store {
 	return store
 }
 
-type MyServer struct {
-	*ident.Server
-}
-
-var www = http.FileServer(http.Dir("www"))
-
-func createServer() *ident.Server {
-	store := createStore()
-
-	dummyStore := &DummyStore{store}
-
-	socials := []*ident.SocialProvider{
-		{
-			ClientId:     "solution-lab-1",
-			ClientSecret: "123456",
-			Config:       openid.MustDiscover("https://login.waziup.io/auth/realms/waziup"),
-		},
+func (s *MyStore) UpdateUsers(ctx context.Context, sel ident.Selection, u *ident.UserUpdate) (numUpdated int, err error) {
+	numUpdated, err = s.Store.UpdateUsers(ctx, sel, u)
+	if err != nil {
+		return 0, err
 	}
 
-	server := ident.NewServer(issuer, dummyStore, store, socials, www)
+	if len(sel.Ids) == 1 {
+		if u.EmailVerified.Valid && u.EmailVerified.Value {
+			_, err = s.UpdateSessions(ctx, "", sel.Ids[0], []string{"member"}, nil)
+			if err != nil {
+				return 0, err
+			}
+		}
+	}
 
-	server.Config.AuthorizationEndpoint = "http://localhost:3000/"
-
-	server.SendMail = PrintEmailToLog
-
-	return server
+	return numUpdated, err
 }

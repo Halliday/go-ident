@@ -21,7 +21,7 @@ func TestServer(t *testing.T) {
 
 	server := createServer(t)
 
-	subs, err := server.UserStore.RegisterUsers(ctx, "", false, []*ident.User{
+	subs, err := server.UserStore.RegisterUsers(ctx, "", false, []*ident.NewUser{
 		{
 			Userinfo: ident.Userinfo{
 				Subject:           adminId,
@@ -52,7 +52,7 @@ func TestServer(t *testing.T) {
 
 	//
 
-	_, err = server.UserStore.RegisterUsers(ctx, "", false, []*ident.User{
+	_, err = server.UserStore.RegisterUsers(ctx, "", false, []*ident.NewUser{
 		{
 			Userinfo: ident.Userinfo{
 				Email: "jeff.starkmann@gmail.com",
@@ -65,7 +65,7 @@ func TestServer(t *testing.T) {
 
 	//
 
-	subs, err = server.UserStore.RegisterUsers(ctx, issFacebook, false, []*ident.User{
+	subs, err = server.UserStore.RegisterUsers(ctx, issFacebook, false, []*ident.NewUser{
 		{
 			Userinfo: ident.Userinfo{
 				Subject:       "fb-" + jeffId,
@@ -93,7 +93,7 @@ func TestServer(t *testing.T) {
 
 	//
 
-	refreshToken, accessToken, scopes, expiresIn, idToken, err := server.Login(ctx, ident.IdentAudience, []string{"*"}, "jeff.starkmann@gmail.com", "jeff456", "")
+	refreshToken, accessToken, scopes, expiresIn, idToken, err := server.Login(ctx, ident.IdentAudience, nil, "jeff.starkmann@gmail.com", "jeff456", "")
 	if err != nil {
 		t.Fatal("can not login user:", err)
 	}
@@ -110,7 +110,7 @@ func TestServer(t *testing.T) {
 	//
 
 	// request updated session after registration completed
-	accessToken, scopes, expiresIn, err = server.RefreshSession(ctx, refreshToken, []string{"*"})
+	accessToken, scopes, expiresIn, err = server.RefreshSession(ctx, refreshToken, nil)
 	if err != nil {
 		t.Fatal("can not refresh token:", err)
 	}
@@ -165,42 +165,6 @@ type DummyStore struct {
 	*pgxstore.Store
 }
 
-func (s *DummyStore) CreateSession(ctx context.Context, aud string, sub string, scopes []string) (sess string, grantedScopes []string, err error) {
-	scopes, err = s.GrantScopes(ctx, aud, sub, scopes)
-	if err != nil {
-		return "", nil, err
-	}
-	return s.Store.CreateSession(ctx, aud, sub, scopes)
-}
-
-func (s *DummyStore) RefreshSession(ctx context.Context, aud string, sess string, scopes []string) (sub string, grantedScopes []string, err error) {
-	if scopes != nil {
-		sub, _, err := s.Store.GetSession(ctx, aud, sess)
-		if err != nil {
-			return "", nil, err
-		}
-		scopes, err = s.GrantScopes(ctx, aud, sub, scopes)
-		if err != nil {
-			return "", nil, err
-		}
-	}
-	return s.Store.RefreshSession(ctx, aud, sess, scopes)
-}
-
-func (s *DummyStore) GrantScopes(ctx context.Context, aud string, sub string, scopes []string) (grantedScopes []string, err error) {
-	info, err := s.Userinfo(ctx, sub)
-	if err != nil {
-		return nil, err
-	}
-	if info.Subject == adminId {
-		return []string{"admin", "openid"}, nil
-	}
-	if info.EmailVerified {
-		return []string{"member", "openid"}, nil
-	}
-	return []string{"openid"}, nil
-}
-
 func createStore(t *testing.T) *pgxstore.Store {
 	ctx := context.Background()
 
@@ -230,95 +194,47 @@ type DummyServer struct {
 	*ident.Server
 }
 
-func createServer(t *testing.T) *ident.Server {
+func createServer(t *testing.T) *DummyServer {
 	store := createStore(t)
 
 	dummyStore := &DummyStore{store}
 
-	return ident.NewServer(issuer, dummyStore, store, nil, nil)
+	server := ident.NewServer(issuer, dummyStore, dummyStore, nil, nil)
+	dummyServer := &DummyServer{server}
+
+	server.GrantScopes = dummyServer.GrantScopes
+
+	return dummyServer
 }
 
-// var hrefRegexp = regexp.MustCompile(`href="(.+)"`)
+func (s *DummyServer) GrantScopes(ctx context.Context, aud string, sub string, scopes []string) (grantedScopes []string, err error) {
+	info, err := s.UserStore.Userinfo(ctx, sub)
+	if err != nil {
+		return nil, err
+	}
+	if info.Subject == adminId {
+		return []string{"admin", "openid"}, nil
+	}
+	if info.EmailVerified {
+		return []string{"member", "openid"}, nil
+	}
+	return []string{"openid"}, nil
+}
 
-// func TestServer(t *testing.T) {
+func (s *DummyStore) UpdateUsers(ctx context.Context, sel ident.Selection, u *ident.UserUpdate) (numUpdated int, err error) {
+	numUpdated, err = s.Store.UpdateUsers(ctx, sel, u)
+	if err != nil {
+		return 0, err
+	}
 
-// 	wazicloud := &ident.SocialProvider{
-// 		ClientId:     "solution-lab-1",
-// 		ClientSecret: "123456",
-// 		Config:       openid.MustDiscover("https://login.waziup.io/auth/realms/waziup"),
-// 	}
+	if len(sel.Ids) == 1 {
+		if u.EmailVerified.Valid && u.EmailVerified.Value {
+			_, err = s.UpdateSessions(ctx, "", sel.Ids[0], []string{"member"}, nil)
+			if err != nil {
+				return 0, err
+			}
+		}
+	}
 
-// 	//
-
-// 	addr := "http://localhost:8085/"
-
-// 	fileServer := http.FileServer(http.Dir("test"))
-// 	next := &router.Route{
-// 		Next: fileServer,
-// 	}
-
-// 	ctx := context.Background()
-// 	pool, err := pgxpool.Connect(ctx, "postgres://postgres:admin@localhost/test")
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	pgxStore := identutil.NewPgxStore(pool)
-// 	if err := pgxStore.SetupDatabase(ctx); err != nil {
-// 		t.Fatal(err)
-// 	}
-
-// 	// sessionStore := identutil.NewMemSessionStore()
-// 	// userStore := identutil.NewMemUserStore()
-
-// 	server := ident.NewServer(addr, pgxStore, pgxStore, []*ident.SocialProvider{wazicloud}, next)
-
-// 	server.EmailHost = "webmediathek.de"
-// 	server.EmailFrom = "hallo@webmediathek.de"
-// 	server.EmailFromDisplayName = "Webmediathek UG"
-// 	server.EmailEnableAuthentication = true
-// 	server.EmailUsername = "hallo@webmediathek.de"
-// 	server.EmailPassword = "srST3ZXQQJsBMqFd"
-
-// 	// server.CompleteRegistrationTemplate = mustLoadTemplate("complete-registration", "templates/complete-registration.html")
-// 	// server.PasswordResetTemplate = mustLoadTemplate("reset-password", "templates/reset-password.html")
-// 	server.SendMail = func(addr string, a smtp.Auth, from string, to []string, msg []byte) error {
-// 		log.Printf("SendMail: %s -> %s", from, to[0])
-// 		parseEmail(msg)
-// 		return smtp.SendMail(addr, a, from, to, msg)
-// 	}
-
-// 	m := &tools.Middleware{
-// 		UnsafeDisableCORS: true,
-// 		Handler:           server,
-// 	}
-
-// 	//
-
-// 	server.Config.AuthorizationEndpoint = "http://localhost:3000/login"
-
-// 	log.Println("Visit " + addr + " to continue.")
-
-// 	err = http.ListenAndServe(":8085", m)
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// }
-
-// func parseEmail(msg []byte) {
-// 	i := bytes.Index(msg, []byte{'\r', '\n', '\r', '\n'})
-// 	if i == -1 {
-// 		panic("invalid email message")
-// 	}
-// 	quotedBody := msg[i+4:]
-// 	body, _ := ioutil.ReadAll(quotedprintable.NewReader(bytes.NewBuffer(quotedBody)))
-// 	// fmt.Print(string(body))
-// 	matches := hrefRegexp.FindAllStringSubmatch(string(body), -1)
-// 	if len(matches) == 0 {
-// 		fmt.Print(string(body))
-// 		fmt.Print("the email contained no links")
-// 	}
-// 	for _, m := range matches {
-// 		log.Printf("link: %s", html.UnescapeString(m[1]))
-// 	}
-// }
+	return numUpdated, err
+}

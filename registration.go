@@ -23,7 +23,7 @@ func (server *Server) register(ctx context.Context, req *RegistrationRequest) (e
 		return e("bad_request")
 	}
 
-	ids, err := server.UserStore.RegisterUsers(ctx, "", false, []*User{{Userinfo: req.Userinfo, Password: NewOption(req.Password)}})
+	ids, err := server.UserStore.RegisterUsers(ctx, "", false, []*NewUser{{Userinfo: req.Userinfo, Password: NewOption(req.Password)}})
 	if err != nil {
 		return err
 	}
