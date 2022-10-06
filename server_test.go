@@ -161,10 +161,6 @@ func connectDatabase(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-type DummyStore struct {
-	*pgxstore.Store
-}
-
 func createStore(t *testing.T) *pgxstore.Store {
 	ctx := context.Background()
 
@@ -190,24 +186,23 @@ func createStore(t *testing.T) *pgxstore.Store {
 	return store
 }
 
-type DummyServer struct {
+type MyServer struct {
 	*ident.Server
 }
 
-func createServer(t *testing.T) *DummyServer {
+func createServer(t *testing.T) *MyServer {
 	store := createStore(t)
 
-	dummyStore := &DummyStore{store}
+	server := ident.NewServer(issuer, store, store, nil, nil)
 
-	server := ident.NewServer(issuer, dummyStore, dummyStore, nil, nil)
-	dummyServer := &DummyServer{server}
+	myServer := &MyServer{server}
 
-	server.GrantScopes = dummyServer.GrantScopes
+	server.GrantScopes = myServer.GrantScopes
 
-	return dummyServer
+	return myServer
 }
 
-func (s *DummyServer) GrantScopes(ctx context.Context, aud string, sub string, scopes []string) (grantedScopes []string, err error) {
+func (s *MyServer) GrantScopes(ctx context.Context, aud string, sub string, scopes []string) (grantedScopes []string, err error) {
 	info, err := s.UserStore.Userinfo(ctx, sub)
 	if err != nil {
 		return nil, err
@@ -219,22 +214,4 @@ func (s *DummyServer) GrantScopes(ctx context.Context, aud string, sub string, s
 		return []string{"member", "openid"}, nil
 	}
 	return []string{"openid"}, nil
-}
-
-func (s *DummyStore) UpdateUsers(ctx context.Context, sel ident.Selection, u *ident.UserUpdate) (numUpdated int, err error) {
-	numUpdated, err = s.Store.UpdateUsers(ctx, sel, u)
-	if err != nil {
-		return 0, err
-	}
-
-	if len(sel.Ids) == 1 {
-		if u.EmailVerified.Valid && u.EmailVerified.Value {
-			_, err = s.UpdateSessions(ctx, "", sel.Ids[0], []string{"member"}, nil)
-			if err != nil {
-				return 0, err
-			}
-		}
-	}
-
-	return numUpdated, err
 }

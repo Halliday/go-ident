@@ -217,6 +217,8 @@ func (server *Server) exchangeSocialLogin(ctx context.Context, req *ExchangeSoci
 		return nil, err
 	}
 
+	scopes := NewScopes(req.Scope)
+
 	// if info.Email == "" {
 	// 	info.EmailVerified = true
 	// }
@@ -228,8 +230,9 @@ func (server *Server) exchangeSocialLogin(ctx context.Context, req *ExchangeSoci
 	if len(subs) != 1 {
 		return nil, ErrNoUser
 	}
+	sub := subs[0]
 
-	refreshToken, accessToken, scopes, expiresIn, idToken, err := server.CreateSession(ctx, IdentAudience, subs[0], nil, "")
+	refreshToken, accessToken, scopes, expiresIn, idToken, err := server.CreateSession(ctx, IdentAudience, sub, scopes, req.Nonce)
 	if err != nil {
 		return nil, err
 	}

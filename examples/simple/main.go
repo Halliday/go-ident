@@ -81,8 +81,6 @@ type MyServer struct {
 func createServer() *MyServer {
 	store := createStore()
 
-	myStore := &MyStore{store}
-
 	socials := []*ident.SocialProvider{
 		{
 			ClientId:     "solution-lab-1",
@@ -91,7 +89,7 @@ func createServer() *MyServer {
 		},
 	}
 
-	server := ident.NewServer(issuer, myStore, myStore, socials, www)
+	server := ident.NewServer(issuer, store, store, socials, www)
 
 	server.Config.AuthorizationEndpoint = "http://localhost:3000/"
 
@@ -120,10 +118,6 @@ func (s *MyServer) GrantScopes(ctx context.Context, aud string, sub string, scop
 
 //
 
-type MyStore struct {
-	*pgxstore.Store
-}
-
 func createStore() *pgxstore.Store {
 	ctx := context.Background()
 
@@ -139,22 +133,4 @@ func createStore() *pgxstore.Store {
 	}
 
 	return store
-}
-
-func (s *MyStore) UpdateUsers(ctx context.Context, sel ident.Selection, u *ident.UserUpdate) (numUpdated int, err error) {
-	numUpdated, err = s.Store.UpdateUsers(ctx, sel, u)
-	if err != nil {
-		return 0, err
-	}
-
-	if len(sel.Ids) == 1 {
-		if u.EmailVerified.Valid && u.EmailVerified.Value {
-			_, err = s.UpdateSessions(ctx, "", sel.Ids[0], []string{"member"}, nil)
-			if err != nil {
-				return 0, err
-			}
-		}
-	}
-
-	return numUpdated, err
 }

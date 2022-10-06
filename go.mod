@@ -6,7 +6,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/halliday/go-errors v0.0.0-20220929094431-9c025f4ebe45
 	github.com/halliday/go-module v0.0.0-20220929094355-c26133bcf695
-	github.com/halliday/go-openid v0.0.0-20221005162019-afe9c33cb33b
+	github.com/halliday/go-openid v0.0.0-20221006065241-32ea50a5e2d9
 	github.com/halliday/go-router v0.0.0-20220713092306-5ee672c884d9
 	github.com/halliday/go-rpc v0.0.0-20220713092510-806c8caa56d4
 	github.com/jackc/pgconn v1.12.1
