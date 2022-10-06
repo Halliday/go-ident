@@ -16,13 +16,28 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-func (store *Store) LoginUser(ctx context.Context, email string, password string) (sub string, err error) {
+func (store *Store) LoginUser(ctx context.Context, username string, password string) (sub string, err error) {
 	var pw pgtype.Text
-	var id pgtype.UUID
-	err = store.Pool.QueryRow(ctx, `
-		SELECT id, hashed_password
-		FROM "`+store.UsersTableName+`" WHERE email = $1`, pgxResultFormatsBinary, email).
-		Scan(&id, &pw)
+
+	id, err := uuid.Parse(username)
+	if err == nil {
+		err = store.Pool.QueryRow(ctx, `
+			SELECT hashed_password
+			FROM "`+store.UsersTableName+`" WHERE id = $1`, pgxResultFormatsBinary, id).
+			Scan(&pw)
+	} else {
+		if strings.IndexByte(username, '@') >= 0 {
+			err = store.Pool.QueryRow(ctx, `
+				SELECT id, hashed_password
+				FROM "`+store.UsersTableName+`" WHERE email = $1`, pgxResultFormatsBinary, username).
+				Scan(&id, &pw)
+		} else {
+			err = store.Pool.QueryRow(ctx, `
+				SELECT id, hashed_password
+				FROM "`+store.UsersTableName+`" WHERE preferred_username = $1`, pgxResultFormatsBinary, username).
+				Scan(&id, &pw)
+		}
+	}
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return "", ident.ErrNoUser
@@ -36,7 +51,7 @@ func (store *Store) LoginUser(ctx context.Context, email string, password string
 	if err != nil {
 		return "", ident.ErrInvalidCredentials
 	}
-	sub = uuid.UUID(id.Bytes).String()
+	sub = id.String()
 	return sub, nil
 }
 
