@@ -172,7 +172,9 @@ func (server *Server) socialLogin(ctx context.Context, req *SocialLoginRequest) 
 	if err != nil {
 		return err
 	}
-	return rpc.Redirect(redirectUri, 303)
+	httpContext := rpc.FindContext(ctx).(*rpc.HTTPContext)
+	http.Redirect(httpContext.Response, httpContext.Request, redirectUri, http.StatusSeeOther)
+	return nil
 }
 
 func (server *Server) postSocialLogin(ctx context.Context, req *SocialLoginRequest) (resp *SocialLoginResponse, err error) {

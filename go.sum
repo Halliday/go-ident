@@ -125,6 +125,10 @@ github.com/halliday/go-router v0.0.0-20220713092306-5ee672c884d9 h1:dekpnTW1XJI8
 github.com/halliday/go-router v0.0.0-20220713092306-5ee672c884d9/go.mod h1:2SqNckYmGYeJ8ZLCSY5ZQgdBCXde4VzetGcFT1Yfa2w=
 github.com/halliday/go-rpc v0.0.0-20220713092510-806c8caa56d4 h1:yEvhO3h6rW/RctKDPNRxZWCiQigUOR9vWltlAPzvK2s=
 github.com/halliday/go-rpc v0.0.0-20220713092510-806c8caa56d4/go.mod h1:BNpqVxU0AKY1bFnXwqZ4/4IWlR+ofUpWx5+NGg0Dppo=
+github.com/halliday/go-rpc v0.0.0-20221011215159-1a4002735059 h1:+8qNgiBM/5t940o4aEZTc8h/8sE6h3nn5L/0Hivncys=
+github.com/halliday/go-rpc v0.0.0-20221011215159-1a4002735059/go.mod h1:BNpqVxU0AKY1bFnXwqZ4/4IWlR+ofUpWx5+NGg0Dppo=
+github.com/halliday/go-rpc v0.0.0-20221014134552-f56eb5e8c4ad h1:FF2mw0TFoIdA/OWoBchYeufgacJvbGJx9o16jiFmEmY=
+github.com/halliday/go-rpc v0.0.0-20221014134552-f56eb5e8c4ad/go.mod h1:BNpqVxU0AKY1bFnXwqZ4/4IWlR+ofUpWx5+NGg0Dppo=
 github.com/halliday/go-tools v0.0.0-20220929094613-ab9bddda4bf1 h1:pS3C/qohy58EvFqz/EiP6wWqpPWzyVrWv9D8safff50=
 github.com/halliday/go-tools v0.0.0-20220929094613-ab9bddda4bf1/go.mod h1:RjyKPgS+z3d/OZZBHWPkmNRxJor1lq3+J8KNBNZXBP8=
 github.com/halliday/go-values v0.0.0-20220713091853-ca69253824a7 h1:rpGx6KE9VM6ZZ/5PoTFYcB1RkW0z3mD/9HbHkD7pAUw=
