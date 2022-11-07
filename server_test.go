@@ -93,7 +93,7 @@ func TestServer(t *testing.T) {
 
 	//
 
-	refreshToken, accessToken, scopes, expiresIn, idToken, err := server.Login(ctx, ident.IdentAudience, nil, "jeff.starkmann@gmail.com", "jeff456", "")
+	refreshToken, accessToken, scopes, expiresIn, idToken, err := server.Login(ctx, ident.IdentAudience, nil, "jeff.starkmann@gmail.com", "jeff456")
 	if err != nil {
 		t.Fatal("can not login user:", err)
 	}

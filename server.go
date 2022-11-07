@@ -258,7 +258,6 @@ type LoginRequest struct {
 	Password string `json:"password"`
 
 	Nonce string `json:"nonce,omitempty"`
-	Scope string `json:"scope,omitempty"`
 }
 
 type LoginResponse = openid.TokenResponse
@@ -266,7 +265,7 @@ type LoginResponse = openid.TokenResponse
 var ErrInvalidCredentials = e("invalid_credentials")
 var ErrNoUser = openid.ErrNoUser
 
-func (server *Server) Login(ctx context.Context, aud string, scopes []string, username string, password string, nonce string) (refreshToken string, accessToken string, grantedScopes []string, expiresIn int64, idToken string, err error) {
+func (server *Server) Login(ctx context.Context, aud string, username string, password string, nonce string) (refreshToken string, accessToken string, grantedScopes []string, expiresIn int64, idToken string, err error) {
 	sub, err := server.UserStore.LoginUser(ctx, username, password)
 	if err != nil {
 		return "", "", nil, 0, "", err
@@ -274,15 +273,11 @@ func (server *Server) Login(ctx context.Context, aud string, scopes []string, us
 	if sub == "" {
 		return "", "", nil, 0, "", ErrInvalidCredentials
 	}
-	grantedScopes, err = server.GrantScopes(ctx, aud, sub, scopes)
-	if err != nil {
-		return "", "", nil, 0, "", err
-	}
-	return server.CreateSession(ctx, aud, sub, grantedScopes, nonce)
+	return server.CreateSession(ctx, aud, sub, nil, nonce)
 }
 
 func (server *Server) login(ctx context.Context, req *LoginRequest) (resp *LoginResponse, err error) {
-	refreshToken, accessToken, scopes, expiresIn, idToken, err := server.Login(ctx, IdentAudience, NewScopes(req.Scope), req.Username, req.Password, req.Nonce)
+	refreshToken, accessToken, scopes, expiresIn, idToken, err := server.Login(ctx, IdentAudience, req.Username, req.Password, req.Nonce)
 	if err != nil {
 		return nil, err
 	}
