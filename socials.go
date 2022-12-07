@@ -2,6 +2,8 @@ package ident
 
 import (
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -94,11 +96,13 @@ func (p SocialProvider) Userinfo(ctx context.Context, server *Server, t *openid.
 		userinfo := new(openid.Userinfo)
 		contentType := resp.Header.Get("Content-Type")
 		switch contentType {
-		case "application/json":
+		case "application/json", "application/json; charset=utf-8":
 			err = json.NewDecoder(resp.Body).Decode(userinfo)
 			return userinfo, err
 		default:
-			return nil, e("social_userinfo_content_type", "ContentType", contentType)
+			data, _ := io.ReadAll(resp.Body)
+			log.Print("userinfo response: ", string(data))
+			return nil, e("social_bad_userinfo_content_type", "ContentType", contentType)
 		}
 	}
 

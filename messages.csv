@@ -19,6 +19,7 @@ invalid_credentials;401;Invalid credentials.
 social_unsupported_response_types;500;The social provider has no supported response type.
 social_unsupported_userinfo_content_type;500;The social provider sent a userinfo with and unsupported content type.
 social_token_type;500;The social provider return an unsupported token type.
+social_bad_userinfo_content_type;500;The social provider returned a bad Content-Type header for the userinfo endpoint.
 social_missing_field;400;Missing field.
 
 register_email_send;2001;Failed to send registration email.
